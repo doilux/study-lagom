@@ -62,12 +62,12 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
     // @formatter:off
     session.executeCreateTable(
       "CREATE TABLE IF NOT EXISTS car ("
-        + "number text, name text, status text,"
-        + "PRIMARY KEY (number))")
+        + "car_number text, name text, status text,"
+        + "PRIMARY KEY (car_number))")
       .thenCompose(a => session.executeCreateTable(
         "CREATE TABLE IF NOT EXISTS car_rent_event ("
-          + "number text, at timestamp, type text,"
-          + "PRIMARY KEY (number, at))"))
+          + "car_number text, at timestamp, type text,"
+          + "PRIMARY KEY (car_number, at))"))
       .thenCompose(b => session.executeCreateTable(
         "CREATE TABLE IF NOT EXISTS car_offset ("
           + "partition int, offset timeuuid, "
@@ -76,7 +76,7 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
   }
 
   private def prepareWriteCar(session: CassandraSession) = {
-    val statement = session.prepare("INSERT INTO car (number, name, status) VALUES (?, ?, ?)")
+    val statement = session.prepare("INSERT INTO car (car_number, name, status) VALUES (?, ?, ?)")
     statement.map(ps => {
       setWriteCar(ps)
       Done
@@ -84,7 +84,7 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
   }
 
   private def prepareWriteEvent(session: CassandraSession) = {
-    val statement = session.prepare("INSERT INTO car_rent_event (number, at, type) VALUES (?, ?, ?)")
+    val statement = session.prepare("INSERT INTO car_rent_event (car_number, at, type) VALUES (?, ?, ?)")
     statement.map(ps => {
       setWriteEvent(ps)
       Done
@@ -92,7 +92,7 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
   }
 
   private def prepareUpdateCar(session: CassandraSession) = {
-    val statement = session.prepare("UPDATE car set status = ? where number = ?")
+    val statement = session.prepare("UPDATE car set status = ? where car_number = ?")
     statement.map((ps) => {
       setUpdateCar(ps)
       Done.getInstance
@@ -120,7 +120,7 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
 
   private def processCarRegistered(event: CarRegistered, offset: UUID) = {
     val bindWriteCar = writeCar.bind
-    bindWriteCar.setString("number", event.number)
+    bindWriteCar.setString("car_number", event.number)
     bindWriteCar.setString("name", event.name)
     bindWriteCar.setString("status", "rent")
     val bindWriteOffset = writeOffset.bind(offset)
@@ -129,25 +129,25 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
 
   private def processCarRented(event: CarRented, offset: UUID) = {
     val bindWriteFollowers = writeEvent.bind()
-    bindWriteFollowers.setString("number", event.number)
+    bindWriteFollowers.setString("car_number", event.number)
     bindWriteFollowers.setTimestamp("at", toTimestamp(offset))
     bindWriteFollowers.setString("type", "rent")
     val bindWriteOffset = writeOffset.bind(offset)
     val bindUpdateCar = updateCar.bind
     bindUpdateCar.setString("type", "ready")
-    bindUpdateCar.setString("number", event.number)
+    bindUpdateCar.setString("car_number", event.number)
     completedStatements(Seq(bindWriteFollowers, bindWriteOffset, bindUpdateCar).asJava)
   }
 
   private def processCarReturned(event: CarReturned, offset: UUID) = {
     val bindWriteFollowers = writeEvent.bind()
-    bindWriteFollowers.setString("number", event.number)
+    bindWriteFollowers.setString("car_number", event.number)
     bindWriteFollowers.setTimestamp("at", toTimestamp(offset))
     bindWriteFollowers.setString("type", "ready")
     val bindWriteOffset = writeOffset.bind(offset)
     val bindUpdateCar = updateCar.bind
     bindUpdateCar.setString("type", "ready")
-    bindUpdateCar.setString("number", event.number)
+    bindUpdateCar.setString("car_number", event.number)
     completedStatements(Seq(bindWriteFollowers, bindWriteOffset, bindUpdateCar).asJava)
   }
 
