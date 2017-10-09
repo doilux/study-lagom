@@ -30,13 +30,9 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
   // 上記のsetter
   // @formatter:off
   private def setWriteCar(stmt: PreparedStatement): Unit = this.writeCar = stmt
-
   private def setWriteEvent(stmt: PreparedStatement): Unit = this.writeEvent = stmt
-
   private def setUpdateCar(stmt: PreparedStatement): Unit = this.updateCar = stmt
-
   private def setWriteOffset(stmt: PreparedStatement): Unit = this.writeOffset = stmt
-
   // @formatter:on
 
   override def aggregateTag: AggregateEventTag[CarEvent] = CarEvent.Tag
@@ -45,11 +41,11 @@ class CarEventProcessor @Inject()(implicit ec: ExecutionContext) extends Cassand
   override def prepare(session: CassandraSession) = {
     // @formatter:off
     prepareCreateTables(session).thenCompose(a =>
-      prepareWriteCar(session).thenCompose(b =>
-        prepareWriteEvent(session).thenCompose(c =>
-          prepareWriteOffset(session).thenCompose(d =>
-            selectOffset(session)
-          ))))
+    prepareWriteCar(session).thenCompose(b =>
+    prepareWriteEvent(session).thenCompose(c =>
+    prepareWriteOffset(session).thenCompose(d =>
+    selectOffset(session)
+    ))))
     // @formatter:on
   }
 
