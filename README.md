@@ -50,6 +50,94 @@ descriptorにサービスを定義している。
 
 #### CarEntity
 上記のようなことを書いてある。あとコマンドを発行したときにステートの状態によってどんな処理をするか書いている（今回は車を登録しようとして、もし登録済みならエラー、くらいしか書いていない）
+```scala
+class CarEntity extends PersistentEntity[CarCommand, CarEvent, CarState] {
+
+  // コマンド発行時の振る舞いを定義する
+  override def initialBehavior(snapshotState: Optional[CarState]): Behavior = {
+    val b = newBehaviorBuilder(snapshotState.orElseGet(() => CarState(Option.empty)))
+
+    // 車両登録コマンドのハンドラ
+    b.setCommandHandler(
+      classOf[Register],
+      (cmd: Register, ctx: CommandContext[Done]) => {
+        state.car match {
+          case Some(_) =>
+            ctx.invalidCommand(s"Car ${entityId} is already created")
+            ctx.done()
+          case None =>
+            val c = cmd.car
+            val event = CarRegistered(c.number, c.name)
+            ctx.thenPersist(
+              event,
+              (evt: CarRegistered) => ctx.reply(Done)
+            )
+        }
+      })
+
+    // 車両登録イベントのハンドラ
+    b.setEventHandler(
+      classOf[CarRegistered],
+      (evt: CarRegistered) => CarState(Car(evt.number, evt.name, "ready")))
+
+    // 貸し出しコマンドのハンドラ
+    b.setCommandHandler(
+      classOf[Rent],
+      (cmd: Rent, ctx: CommandContext[Done]) => {
+        state.car match {
+          case None =>
+            ctx.invalidCommand(s"Car ${entityId} is not created")
+            ctx.done()
+          case Some(car) if car.status == "rent" =>
+            ctx.reply(Done)
+            ctx.done()
+          case Some(car) =>
+            val event = CarRented(car.number)
+            ctx.thenPersist(
+              event,
+              (evt: CarRented) => ctx.reply(Done))
+        }
+      })
+
+    // 貸し出しイベントのハンドラ
+    b.setEventHandler(
+      classOf[CarRented],
+      (evt: CarRented) => state.rent(evt.number))
+
+    // 返却コマンドのハンドラ
+    b.setCommandHandler(
+      classOf[Return],
+      (cmd: Return, ctx: CommandContext[Done]) => {
+        state.car match {
+          case None =>
+            ctx.invalidCommand(s"Car ${entityId} is not created")
+            ctx.done()
+          case Some(car) if car.status == "ready" =>
+            ctx.reply(Done)
+            ctx.done()
+          case Some(car) =>
+            ctx.thenPersist(
+              CarReturned(car.number),
+              (evt: CarReturned) => ctx.reply(Done))
+        }
+      })
+
+    // 返却イベントのハンドラ
+    b.setEventHandler(
+      classOf[CarReturned],
+      (evt: CarReturned) => state.ret(evt.number))
+
+    // 車両情報取得コマンド（クエリ？）のハンドラ
+    b.setReadOnlyCommandHandler(
+      classOf[GetCar],
+      (cmd: GetCar, ctx: ReadOnlyCommandContext[GetCarReply]) =>
+        ctx.reply(GetCarReply(state.car))
+    )
+
+    b.build()
+  }
+```
+
 多分、こいつがActorになって、誰か（SuperVisor）に監視される。
 
 #### CarCommands
@@ -87,10 +175,66 @@ case class CarReturned(number: String, timestamp: Instant = Instant.now()) exten
 
 #### CarState
 ステート
+```scala
+case class CarState(car: Option[Car]) extends Jsonable {
+  def rent(friendUserId: String): CarState = car match {
+    case None => throw new IllegalStateException("status can't change before car is registered")
+    case Some(c) =>
+      CarState(Some(c.copy(status = "rent")))
+  }
+
+  def ret(friendUserId: String): CarState = car match {
+    case None => throw new IllegalStateException("status can't change before car is registered")
+    case Some(c) =>
+      CarState(Some(c.copy(status = "ready")))
+  }
+}
+
+object CarState {
+  def apply(car: Car): CarState = CarState(Option(car))
+}
+```
 
 #### CarEventProcessor
 ここが一番わからなかった。自分の中ではDDDでいうところのデータソース層に相当するものと認識。
 prepareメソッドでテーブルの初期化と、PreparedStatementの登録をしている。
+```scala
+  override def prepare(session: CassandraSession) = {
+    // @formatter:off
+    prepareCreateTables(session).thenCompose(a =>
+    prepareWriteCar(session).thenCompose(b =>
+    prepareWriteEvent(session).thenCompose(c =>
+    prepareWriteOffset(session).thenCompose(d =>
+    selectOffset(session)
+    ))))
+    // @formatter:on
+  }
+
+
+  /*
+    オフセットについての詳細
+    https://qiita.com/kencharos/items/10fc88c4d3c9956d843c
+   */
+  private def prepareCreateTables(session: CassandraSession) = {
+    // @formatter:off
+    session.executeCreateTable(
+      "CREATE TABLE IF NOT EXISTS car ("
+        + "car_number text, name text, status text,"
+        + "PRIMARY KEY (car_number))")
+      .thenCompose(a => session.executeCreateTable(
+        "CREATE TABLE IF NOT EXISTS car_rent_event ("
+          + "car_number text, at timestamp, type text,"
+          + "PRIMARY KEY (car_number, at))"))
+      .thenCompose(b => session.executeCreateTable(
+        "CREATE TABLE IF NOT EXISTS car_offset ("
+          + "partition int, offset timeuuid, "
+          + "PRIMARY KEY (partition))"))
+    // @formatter:on
+  }
+```
+
+
+
 defineEventHandlersメソッドで各イベントが発火した際のコールバック関数をセットしている。
 ```scala
   override def defineEventHandlers(builder: EventHandlersBuilder): EventHandlers = {
