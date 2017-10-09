@@ -127,6 +127,9 @@ defineEventHandlersメソッドで各イベントが発火した際のコール�
 
 ## 参考資料まとめ
 
+Lagom で学ぶ Reactive Microservices Architecture @ 第3回Reactive System Meetup in 西新宿
+https://www.slideshare.net/negokaz/lagom-reactive-microservices-architecture
+
 kencharosさん
 https://qiita.com/kencharos/items/05a5916d5b8c8aae2c26
 他
